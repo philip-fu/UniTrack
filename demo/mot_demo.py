@@ -167,7 +167,7 @@ def main(exp, args):
         print(e)
 
     output_video_path = osp.join(result_root, video_name+'.avi')
-    cmd_str = 'ffmpeg -f image2 -i {}/%05d.jpg -c:v copy {}'.format(
+    cmd_str = 'ffmpeg -y -f image2 -i {}/%05d.jpg -c:v copy {}'.format(
             osp.join(result_root, 'frame'), output_video_path)
     os.system(cmd_str)
 

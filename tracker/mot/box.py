@@ -27,6 +27,9 @@ class BoxAssociationTracker(AssociationTracker):
         return ret
 
     def prepare_obs(self, img, img0, obs):
+        if len(obs) == 0:
+            return []
+        
         obs = torch.from_numpy(obs[obs[:, 4] > self.opt.conf_thres]).float()
         if len(obs) > 0:
             obs = xywh2xyxy(obs)

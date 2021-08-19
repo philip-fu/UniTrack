@@ -3,8 +3,8 @@ import os
 import numpy as np
 
 # Modify here
-mot16_root = '/home/wangzd/datasets/MOT/MOT16'
-seq_root = osp.join(mot16_root,'images', 'train')
+mot16_root = 'C:/Users/Philip Fu/datasets/MOT16/images'
+seq_root = osp.join(mot16_root, 'train')
 
 label_root = osp.join(mot16_root, 'obs', 'gt', 'train')
 os.makedirs(label_root, exist_ok=True)

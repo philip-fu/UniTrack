@@ -3,6 +3,7 @@ import pdb
 import cv2
 import time
 import itertools
+import copy
 import os.path as osp
 from collections import deque
 
@@ -71,15 +72,36 @@ class AssociationTracker(object):
 
         ''' Step 2: First association, with embedding'''
         tracks = joint_stracks(tracked_stracks, self.lost_stracks)
+
+        #for trk in tracks:
+        #    if trk.track_id in (11, 14):
+        #        print("track id {}, state: {}, activated: {}. Frame id {}, end frame {}".format(trk.track_id, trk.state, trk.is_activated, trk.frame_id, trk.end_frame))
+
+
         dists, recons_ftrk = matching.reconsdot_distance(tracks, detections)
         if self.opt.use_kalman: 
             # Predict the current location with KF
             STrack.multi_predict(tracks)
             dists = matching.fuse_motion(self.kalman_filter, dists, tracks, detections, 
                     lambda_=self.opt.motion_lambda, gate=self.opt.motion_gated)
-        if obs.shape[1] == 6:
+        if len(obs) > 0 and self.opt.category_gated and obs.shape[1] == 6:
             dists = matching.category_gate(dists, tracks, detections)
-        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.7)
+        if len(obs) > 0 and self.opt.area_gated:
+            dists = matching.area_gate(dists, tracks, detections, self.opt.area_diff_threshold)
+        if len(obs) > 0 and self.opt.reactivate_on_edge:
+            dists = matching.edge_gate(dists, tracks, detections, im_shape=self.opt.img_size[::-1])
+
+        if int(os.getenv('DEBUG', 0)):
+            PRINT_FRAME = os.getenv('PRINT_FRAME', None)
+            if PRINT_FRAME is None:
+                print('='*30)
+                print(self.frame_id, dists)
+            elif int(PRINT_FRAME) in [self.frame_id, -2]:
+                print('='*30)
+                print(self.frame_id, dists)
+                
+
+        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.opt.assign_thres) # was 0.7
 
         for itracked, idet in matches:
             track = tracks[itracked]
@@ -88,15 +110,21 @@ class AssociationTracker(object):
                 track.update(detections[idet], self.frame_id)
                 activated_stracks.append(track)
             else:
-                track.re_activate(det, self.frame_id, new_id=False)
-                refind_stracks.append(track)
+                reactivate = True
+                if self.opt.reactivate_on_edge:
+                    if is_box_on_edge(track.tlbr, self.opt.img_size[::-1]):
+                        if not is_box_on_edge(det.tlbr, self.opt.img_size[::-1]):
+                            reactivate = False
+                if reactivate:
+                    track.re_activate(det, self.frame_id, new_id=False)
+                    refind_stracks.append(track)
         
         if self.opt.use_kalman:
             '''(optional) Step 3: Second association, with IOU'''
             tracks = [tracks[i] for i in u_track if tracks[i].state==TrackState.Tracked]
             detections = [detections[i] for i in u_detection]
             dists = matching.iou_distance(tracks, detections)
-            matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.5)
+            matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.7) # was 0.5
             
             for itracked, idet in matches:
                 track = tracks[itracked]
@@ -133,7 +161,8 @@ class AssociationTracker(object):
             track = detections[inew]
             if track.score < self.det_thresh:
                 continue
-            track.activate(self.kalman_filter, self.frame_id)
+            #track.activate(self.kalman_filter, self.frame_id)
+            track.activate(KalmanFilter(), self.frame_id)
             activated_stracks.append(track)
 
         """ Step 5: Update state"""
@@ -145,18 +174,30 @@ class AssociationTracker(object):
         self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
         self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_stracks)
         self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)
+        self.removed_stracks = sub_stracks(self.removed_stracks, refind_stracks)
+        self.removed_stracks.extend(removed_stracks)
         self.lost_stracks = sub_stracks(self.lost_stracks, self.tracked_stracks)
         self.lost_stracks.extend(lost_stracks)
         self.lost_stracks = sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.removed_stracks.extend(removed_stracks)
         self.tracked_stracks, self.lost_stracks = remove_duplicate_stracks(
                 self.tracked_stracks, self.lost_stracks, ioudist=self.opt.dup_iou_thres)
 
+        #print_strack_status(self.tracked_stracks, 'self.tracked_stracks at the end of frame {}'.format(self.frame_id))
+        #print_strack_status(self.lost_stracks, 'self.lost_stracks at the end of frame {}'.format(self.frame_id))
+        
+
         # get scores of lost tracks
-        output_stracks = [track for track in self.tracked_stracks if track.is_activated]
+        output_stracks = [copy.copy(track) for track in self.tracked_stracks if track.is_activated]
         return output_stracks
 
 
 
         
 
+def print_strack_status(stracks, name):
+    print(name)
+    ids = []
+    for trk in stracks:
+        ids.append(trk.track_id)
+
+    print(ids)

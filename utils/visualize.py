@@ -86,7 +86,7 @@ def plot_tracking(image, obs, obj_ids, scores=None, frame_id=0, fps=0.):
 
     for i, ob in enumerate(obs): 
         obj_id = int(obj_ids[i])
-        id_text = '{}'.format(int(obj_id))
+        id_text = 'id-{}'.format(int(obj_id))
         _line_thickness = 1 if obj_id <= 0 else line_thickness
         color = get_color(obj_id)
         if len(ob) == 4:

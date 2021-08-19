@@ -97,6 +97,18 @@ def scale_box_input_size(img_size, coords, img0_shape):
     coords[:, 0:4] /= gain
     return coords
 
+def is_box_on_edge(bbox, im_shape, edge_percent=.05):
+    if bbox[0] < im_shape[1] * edge_percent:
+        return True
+    elif bbox[2] > im_shape[1] * (1 - edge_percent):
+        return True
+    elif bbox[1] < im_shape[0] * edge_percent:
+        return True
+    elif bbox[3] > im_shape[0] * (1 - edge_percent):
+        return True
+
+    return False
+
 
 def clip_boxes(boxes, im_shape):
     """
