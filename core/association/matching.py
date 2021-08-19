@@ -9,7 +9,7 @@ import lap
 
 from cython_bbox import bbox_overlaps as bbox_ious
 from core.motion import kalman_filter
-import time
+from utils.box import is_box_on_edge
 
 def merge_matches(m1, m2, shape):
     O,P,Q = shape
@@ -82,6 +82,37 @@ def iou_distance(atracks, btracks):
 
     return cost_matrix
 
+def dimension_distance(atracks, btracks):
+    """
+    Compute cost based on IoU
+    :type atracks: list[STrack]
+    :type btracks: list[STrack]
+
+    :rtype cost_matrix np.ndarray
+    """
+
+    if (len(atracks)>0 and isinstance(atracks[0], np.ndarray)) or (len(btracks) > 0 and isinstance(btracks[0], np.ndarray)):
+        atlwhs = atracks
+        btlwhs = btracks
+    else:
+        atlwhs = [track.tlwh for track in atracks]
+        btlwhs = [track.tlwh for track in btracks]
+    cost_matrix = dimension_diff(atlwhs, btlwhs)
+    
+    return cost_matrix
+
+def dimension_diff(atlwhs, btlwhs):
+    dist = np.zeros((len(atlwhs), len(btlwhs)), dtype=np.float)
+    if dist.size == 0:
+        return dist
+
+    dist = cdist(
+        np.array(atlwhs)[:,2:4],
+        np.array(btlwhs)[:,2:4],
+    )
+
+    return dist
+
 def embedding_distance(tracks, detections, metric='cosine'):
     """
     :param tracks: list[STrack]
@@ -102,15 +133,18 @@ def embedding_distance(tracks, detections, metric='cosine'):
 def fuse_motion(kf, cost_matrix, tracks, detections, only_position=False, lambda_=0.98, gate=True):
     if cost_matrix.size == 0:
         return cost_matrix
-    gating_dim = 2 if only_position else 4
-    gating_threshold = kalman_filter.chi2inv95[gating_dim]
+    gating_dim = 4 if only_position else 8
+    gating_threshold = kalman_filter.chi2inv95[gating_dim] * 10
+
+    dimension_cost_matrix = dimension_distance(tracks, detections)
+
     measurements = np.asarray([det.to_xyah() for det in detections])
     for row, track in enumerate(tracks):
         gating_distance = kf.gating_distance(
             track.mean, track.covariance, measurements, only_position, metric='maha')
         if gate:
             cost_matrix[row, gating_distance > gating_threshold] = np.inf
-        cost_matrix[row] = lambda_ * cost_matrix[row] + (1-lambda_)* gating_distance
+        cost_matrix[row] = cost_matrix[row] + (1-lambda_) * 1. * np.sqrt(gating_distance) + (1-lambda_) * .0 * dimension_cost_matrix[row]
     return cost_matrix
 
 
@@ -257,4 +291,103 @@ def category_gate(cost_matrix, tracks, detections):
             det_categories[None, :] - trk_categories[:, None])
     return cost_matrix
 
+def area_gate(cost_matrix, tracks, detections, gated_threshold):
+    """
+    :param tracks: list[STrack]
+    :param detections: list[BaseTrack]
+    :param gated_threshold: float between [0,1]. Lower bound of area diff
+    :return: cost_matrix np.ndarray
+    """
+    if cost_matrix.size == 0:
+        return cost_matrix
+
+    area_diff_matrix = area_distance(tracks, detections)
+
+
+    cost_matrix[np.where(area_diff_matrix < gated_threshold)] = np.inf
+    return cost_matrix
+
+
+def area_distance(atracks, btracks):
+    """
+    Compute cost based on areaA / areaB, where areaB > areaA
+    :type atracks: list[STrack]
+    :type btracks: list[STrack]
+
+    :rtype cost_matrix np.ndarray
+    """
+
+    if (len(atracks)>0 and isinstance(atracks[0], np.ndarray)) or (len(btracks) > 0 and isinstance(btracks[0], np.ndarray)):
+        atlwhs = atracks
+        btlwhs = btracks
+    else:
+        atlwhs = np.stack([track.tlwh for track in atracks], axis=0)
+        btlwhs = np.stack([track.tlwh for track in btracks], axis=0)
+    cost_matrix = area_diff(atlwhs, btlwhs)
+    
+    return cost_matrix
+
+def area_diff(atlwhs, btlwhs):
+    dist = np.zeros((len(atlwhs), len(btlwhs)), dtype=np.float)
+    if dist.size == 0:
+        return dist
+
+    dist = cdist(
+        np.array(atlwhs[:, 2] * atlwhs[:, 3]).reshape((-1,1)),
+        np.array(btlwhs[:, 2] * btlwhs[:, 3]).reshape((-1,1)),
+        lambda u, v: min(u/max(1e-5,v), v/max(1e-5,u))
+    )
+
+    return dist
+
+
+def edge_gate(cost_matrix, tracks, detections, im_shape, penalty=1.25):
+    """
+    :param tracks: list[STrack]
+    :param detections: list[BaseTrack]
+    :param penalty: float. If i at edge but j not at edge, cost of i and j will multiply penalty
+    :return: cost_matrix np.ndarray. If both the edge status (at image edge or not) of i,j is the same or if they have iou>0, cost_matrix[i,j]=1
+    """
+    if cost_matrix.size == 0:
+        return cost_matrix
+
+    edge_matrix = edge_distance(tracks, detections, im_shape)
+    cost_matrix[np.where(edge_matrix == 0)] *= penalty
+    return cost_matrix
+
+
+def edge_distance(atracks, btracks, im_shape):
+    """
+    Compute cost based on edge status
+    :type atracks: list[STrack]
+    :type btracks: list[STrack]
+
+    :rtype cost_matrix np.ndarray
+    """
+
+    if (len(atracks)>0 and isinstance(atracks[0], np.ndarray)) or (len(btracks) > 0 and isinstance(btracks[0], np.ndarray)):
+        atlbrs = atracks
+        btlbrs = btracks
+    else:
+        atlbrs = np.stack([track.tlbr for track in atracks], axis=0)
+        btlbrs = np.stack([track.tlbr for track in btracks], axis=0)
+
+    cost_matrix = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float)
+    if cost_matrix.size == 0:
+        return cost_matrix
+
+    cost_matrix = cdist(
+        atlbrs,
+        btlbrs,
+        lambda u, v: (is_box_on_edge(u, im_shape) == is_box_on_edge(v, im_shape))
+    )
+
+    ious = bbox_ious(
+        np.ascontiguousarray(atlbrs, dtype=np.float),
+        np.ascontiguousarray(btlbrs, dtype=np.float)
+    )
+
+    cost_matrix += ious
+    
+    return cost_matrix
 
