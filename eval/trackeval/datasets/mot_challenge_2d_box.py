@@ -37,6 +37,7 @@ class MotChallenge2DBox(_BaseDataset):
             'SKIP_SPLIT_FOL': False,  # If False, data is in GT_FOLDER/BENCHMARK-SPLIT_TO_EVAL/ and in
                                       # TRACKERS_FOLDER/BENCHMARK-SPLIT_TO_EVAL/tracker/
                                       # If True, then the middle 'benchmark-split' folder is skipped for both.
+            'EVAL_PROD': False, # if true, will look for SEQNAME_prod.txt as tracker input
         }
         return default_config
 
@@ -53,7 +54,7 @@ class MotChallenge2DBox(_BaseDataset):
             split_fol = gt_set
         else:
             split_fol = ''
-        if self.benchmark == 'MOT16':
+        if self.benchmark in ['MOT16', 'ap']:
             split_fol = ''
         self.gt_fol = os.path.join(self.config['GT_FOLDER'], split_fol)
         self.tracker_fol = os.path.join(self.config['TRACKERS_FOLDER'], split_fol)
@@ -119,7 +120,7 @@ class MotChallenge2DBox(_BaseDataset):
                     raise TrackEvalException('Tracker file not found: ' + tracker + '/' + os.path.basename(curr_file))
             else:
                 for seq in self.seq_list:
-                    curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt')
+                    curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt') if not self.config['EVAL_PROD'] else os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '_prod.txt')
                     if not os.path.isfile(curr_file):
                         print('Tracker file not found: ' + curr_file)
                         raise TrackEvalException(
@@ -196,7 +197,7 @@ class MotChallenge2DBox(_BaseDataset):
             if is_gt:
                 file = self.config["GT_LOC_FORMAT"].format(gt_folder=self.gt_fol, seq=seq)
             else:
-                file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt')
+                file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt') if not self.config['EVAL_PROD'] else os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '_prod.txt')
 
         # Load raw data from text file
         read_data, ignore_data = self._load_simple_text_file(file, is_zipped=self.data_is_zipped, zip_file=zip_file)
@@ -226,6 +227,7 @@ class MotChallenge2DBox(_BaseDataset):
             if time_key in read_data.keys():
                 try:
                     time_data = np.asarray(read_data[time_key], dtype=np.float)
+                    time_data = time_data[time_data[:, 1] != -1,:]
                 except ValueError:
                     if is_gt:
                         raise TrackEvalException(
@@ -246,8 +248,8 @@ class MotChallenge2DBox(_BaseDataset):
                         err = 'Cannot load tracker data from tracker %s, sequence %s, because there is not enough ' \
                               'columns in the data.' % (tracker, seq)
                         raise TrackEvalException(err)
-                if time_data.shape[1] >= 8:
-                    raw_data['classes'][t] = np.atleast_1d(time_data[:, 7]).astype(int)
+                if time_data.shape[1] >= 8: # last 3 columns are x,y,z = -1
+                    raw_data['classes'][t] = np.abs(np.atleast_1d(time_data[:, 7]).astype(int))
                 else:
                     if not is_gt:
                         raw_data['classes'][t] = np.ones_like(raw_data['ids'][t])

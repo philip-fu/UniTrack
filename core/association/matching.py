@@ -130,23 +130,46 @@ def embedding_distance(tracks, detections, metric='cosine'):
     return cost_matrix
 
 
-def fuse_motion(kf, cost_matrix, tracks, detections, only_position=False, lambda_=0.98, gate=True):
+def fuse_motion(kf, cost_matrix, tracks, detections, only_position=False, lambda_=0.98, gate=True, img_size=[1920, 1080]):
     if cost_matrix.size == 0:
         return cost_matrix
+    
     gating_dim = 4 if only_position else 8
-    gating_threshold = kalman_filter.chi2inv95[gating_dim] * 10
+    gating_threshold = kalman_filter.chi2inv95[gating_dim]
+
+    #gating_threshold = (0.2 * min(img_size)) ** 2.
 
     dimension_cost_matrix = dimension_distance(tracks, detections)
 
     measurements = np.asarray([det.to_xyah() for det in detections])
     for row, track in enumerate(tracks):
         gating_distance = kf.gating_distance(
-            track.mean, track.covariance, measurements, only_position, metric='maha')
-        if gate:
+            track.mean, track.covariance, measurements, only_position, metric='gaussian') # was 'maha'
+        if gate: #TrackState.Lost: # this only works for maha distance
+            # only add gate if track is lost too long???
             cost_matrix[row, gating_distance > gating_threshold] = np.inf
-        cost_matrix[row] = cost_matrix[row] + (1-lambda_) * 1. * np.sqrt(gating_distance) + (1-lambda_) * .0 * dimension_cost_matrix[row]
+        cost_matrix[row] = lambda_ * cost_matrix[row] + ((1-lambda_) * 1. * np.sqrt(gating_distance) + (1-lambda_) * .0 * dimension_cost_matrix[row]) / np.linalg.norm(img_size)
     return cost_matrix
 
+
+def emb_euclidean_distance(tracks, detections, metric='cosine'):
+    """
+    :param tracks: list[STrack]
+    :param detections: list[BaseTrack]
+    :param metric:
+    :return: cost_matrix np.ndarray
+    """
+
+    cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float)
+    if cost_matrix.size == 0:
+        return cost_matrix
+    det_features = torch.stack([track.curr_feat.squeeze() for track in detections])
+    track_features = torch.stack([track.smooth_feat.squeeze() for track in tracks])
+    normed_det = F.normalize(det_features)
+    normed_track = F.normalize(track_features)
+    cost_matrix = torch.cdist(normed_track, normed_det).detach().cpu().numpy()
+    #cost_matrix = 1 - cost_matrix.detach().cpu().numpy()
+    return cost_matrix
 
 def center_emb_distance(tracks, detections, metric='cosine'):
     """
@@ -214,6 +237,9 @@ def get_track_feat(tracks, feat_flag='curr'):
         feat_list = [track.smooth_feat.squeeze(0) for track in tracks]
     else:
         raise NotImplementedError
+
+    # reshape to 2 dims
+    feat_list = [f.reshape((1,-1)) if len(f.shape) == 1 else f for f in feat_list ]
     
     n = len(tracks)
     fdim = feat_list[0].shape[0]
@@ -225,7 +251,7 @@ def get_track_feat(tracks, feat_flag='curr'):
     ret = torch.zeros(n, fdim, np.max(numels)).to(feat_list[0].device)
     for i, f in enumerate(feat_list):
         ret[i, :, :numels[i]] = f
-    return ret 
+    return ret
 
 def reconsdot_distance(tracks, detections, tmp=100):
     """
@@ -236,7 +262,7 @@ def reconsdot_distance(tracks, detections, tmp=100):
     """
     cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float)
     if cost_matrix.size == 0:
-        return cost_matrix, None
+        return cost_matrix
     det_features_ = get_track_feat(detections)
     track_features_ = get_track_feat(tracks, feat_flag='curr')
 
@@ -271,7 +297,7 @@ def reconsdot_distance(tracks, detections, tmp=100):
     cost_matrix = 1 - 0.5 * (dot_td + dot_dt.transpose(0, 1))
     cost_matrix = cost_matrix.detach().cpu().numpy()
 
-    return cost_matrix, None
+    return cost_matrix
 
 
 def category_gate(cost_matrix, tracks, detections):

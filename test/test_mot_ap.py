@@ -63,48 +63,48 @@ def eval_seq(opt, dataloader, result_filename, save_dir=None,
 
 
 def main(opt, data_root, seqs=('MOT16-05',), exp_name='demo',
-         save_images=False, save_videos=False, show_image=True,
-         calculate_metrics=False):
+         save_images=False, save_videos=False, show_image=True):
     logger.setLevel(logging.INFO)
     result_root = os.path.join('results/mot', exp_name, 'quantitive')
     mkdir_if_missing(result_root)
 
     # run tracking
-    n_frame = 0
-    timer_avgs, timer_calls = [], []
-    for seq in seqs:
-        output_dir = os.path.join('results/mot', exp_name, 'qualitative', seq)\
-                    if save_images or save_videos else None
+    if not opt.eval_only:
+        n_frame = 0
+        timer_avgs, timer_calls = [], []
+        for seq in seqs:
+            output_dir = os.path.join('results/mot', exp_name, 'qualitative', seq)\
+                        if save_images or save_videos else None
 
-        logger.info('start seq: {} at {}'.format(seq, osp.join(data_root, seq, 'img1')))
-        dataloader = videodataset.LoadImagesAndObs(
-                osp.join(data_root, seq, 'img1'), opt)
-        result_filename = os.path.join(result_root, '{}.txt'.format(seq))
-        meta_info = open(os.path.join(data_root, seq, 'seqinfo.ini')).read()
-        frame_rate = int(meta_info[meta_info.find('frameRate')+10:
-                                   meta_info.find('\nseqLength')])
-        nf, ta, tc = eval_seq(opt, dataloader, result_filename,
-                              save_dir=output_dir, show_image=show_image,
-                              frame_rate=frame_rate)
-        n_frame += nf
-        timer_avgs.append(ta)
-        timer_calls.append(tc)
+            logger.info('start seq: {} at {}'.format(seq, osp.join(data_root, seq, 'img1')))
+            dataloader = videodataset.LoadImagesAndObs(
+                    osp.join(data_root, seq, 'img1'), opt)
+            result_filename = os.path.join(result_root, '{}.txt'.format(seq))
+            meta_info = open(os.path.join(data_root, seq, 'seqinfo.ini')).read()
+            frame_rate = int(meta_info[meta_info.find('frameRate')+10:
+                                    meta_info.find('\nseqLength')])
+            nf, ta, tc = eval_seq(opt, dataloader, result_filename,
+                                save_dir=output_dir, show_image=show_image,
+                                frame_rate=frame_rate)
+            n_frame += nf
+            timer_avgs.append(ta)
+            timer_calls.append(tc)
 
-        # eval
-        logger.info('Evaluate seq: {}'.format(seq))
-        if save_videos:
-            output_video_path = osp.join(output_dir, '{}.avi'.format(seq))
-            cmd_str = 'ffmpeg -y -f image2 -i {}/%05d.jpg -c:v copy {}'.format(
-                    output_dir, output_video_path)
-            os.system(cmd_str)
-    timer_avgs = np.asarray(timer_avgs)
-    timer_calls = np.asarray(timer_calls)
-    all_time = np.dot(timer_avgs, timer_calls)
-    avg_time = all_time / np.sum(timer_calls)
-    logger.info('Time elapsed: {:.2f} seconds, FPS: {:.2f}'.format(
-        all_time, 1.0 / avg_time))
+            # eval
+            logger.info('Evaluate seq: {}'.format(seq))
+            if save_videos:
+                output_video_path = osp.join(output_dir, '{}.avi'.format(seq))
+                cmd_str = 'ffmpeg -y -f image2 -i {}/%05d.jpg -c:v copy {}'.format(
+                        output_dir, output_video_path)
+                os.system(cmd_str)
+        timer_avgs = np.asarray(timer_avgs)
+        timer_calls = np.asarray(timer_calls)
+        all_time = np.dot(timer_avgs, timer_calls)
+        avg_time = all_time / np.sum(timer_calls)
+        logger.info('Time elapsed: {:.2f} seconds, FPS: {:.2f}'.format(
+            all_time, 1.0 / avg_time))
 
-    if calculate_metrics:
+    if opt.calculate_metrics or opt.eval_only:
         eval_config = trackeval.Evaluator.get_default_eval_config()
         dataset_config = trackeval.datasets.MotChallenge2DBox.get_default_dataset_config()
         metrics_config = {'METRICS': ['HOTA', 'CLEAR', 'Identity']}
@@ -117,13 +117,14 @@ def main(opt, data_root, seqs=('MOT16-05',), exp_name='demo',
         dataset_config['TRACKERS_FOLDER'] = osp.join(result_root, '..')
         dataset_config['TRACKER_SUB_FOLDER'] = ''
         dataset_config['TRACKERS_TO_EVAL'] = ['quantitive']
-        dataset_config['BENCHMARK'] = 'MOT16'
+        dataset_config['BENCHMARK'] = 'ap'
+
+        dataset_config['EVAL_PROD'] = opt.eval_prod
 
         evaluator = trackeval.Evaluator(eval_config)
         dataset_list = [trackeval.datasets.MotChallenge2DBox(dataset_config)]
         metrics_list = []
-        for metric in [trackeval.metrics.HOTA, trackeval.metrics.CLEAR,
-                    trackeval.metrics.Identity, trackeval.metrics.VACE]:
+        for metric in [trackeval.metrics.HOTA, trackeval.metrics.CLEAR, trackeval.metrics.Identity]:
             if metric.get_name() in metrics_config['METRICS']:
                 metrics_list.append(metric())
         if len(metrics_list) == 0:
@@ -154,5 +155,4 @@ if __name__ == '__main__':
          exp_name=opt.exp_name,
          show_image=False,
          save_images=opt.save_images,
-         save_videos=opt.save_videos,
-         calculate_metrics=opt.calculate_metrics)
+         save_videos=opt.save_videos)

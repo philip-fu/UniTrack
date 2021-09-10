@@ -1,0 +1,59 @@
+common:
+    exp_name: mgn 
+   
+    # Model related
+    model_type: fast-reid
+    remove_layers: []
+    im_mean: [0,0,0]
+    im_std: [1,1,1]
+    #im_mean: [0.485, 0.456, 0.406]
+    #im_std: [0.229, 0.224, 0.225]
+    nopadding: False
+    resume: None
+
+    # for fast reid
+    config_file: 'config/model_config/mgn_R50-ibn.yaml'
+    opts: ['MODEL.WEIGHTS', 'weights/mgn_r50-ibn.pth']
+    
+    # Misc
+    down_factor: 8
+    infer2D: True 
+    workers: 4
+    gpu_id: 0
+    device: cuda
+
+
+
+mot:
+    obid: 'det'
+    mot_root: 'C:/Users/Philip Fu/datasets/ap'
+    seqs: ['201907251018_darshan_lane48', '201907251032_darshan_lane48', '201907251047_darshan_lane47', '201907251053_darshan_lane47', '201907251056_darshan_lane47', '201907251100_darshan_lane47', '201907251103_darshan_lane47', '201907251115_darshan_lane46', '201907251118_darshan_lane46', '201907251121_darshan_lane46']
+    #seqs: ['fp_20210908_967_27_1631111760000-1631111850000', 'fp_20210908_967_28_1631119740000-1631119760000', 'fp_20210908_967_30_1631105760000-1631105820000', 'fp_20210908_967_33_1631111940000-1631112060000', 'fp_20210908_967_46_1631105880000-1631105940000', 'fp_20210908_967_46_1631117820000-1631117880000', 'fp_20210908_967_47_1631105580000-1631105660000', 'fp_20210908_1000_44_1631072950000-1631072960000', 'fp_20210908_2656_45_1631052655000-1631052690000', 'fp_20210908_2656_48_1631054700000-1631054760000', 'fp_20210908_2656_50_1631053500000-1631053540000', 'fp_20210908_3648_33_1631118210000-1631118260000', 'fp_20210908_3648_37_1631114670000-1631114730000', 'fp_20210908_3648_39_1631117100000-1631117160000', 'fp_20210908_3648_43_1631114010000-1631114060000', 'fp_20210908_3648_46_1631123790000-1631123835000', 'fp_20210908_3648_47_1631116350000-1631116440000', 'fp_20210908_3648_50_1631113980000-1631114055000', 'fp_20210908_3763_35_1631128500000-1631128560000', 'fp_20210908_3763_37_1631118700000-1631118730000', 'fp_20210908_3763_45_1631121420000-1631121480000', 'fp_20210908_3763_45_1631127180000-1631127240000', 'fp_20210908_3763_51_1631118420000-1631118450000', 'fp_20210908_6243_1_1631125530000-1631125560000']
+    feat_size: [384, 128]
+    save_videos: True
+    save_images: False
+    data_set_type: 'train'
+    track_buffer: 60
+    min_box_area: 200
+    nms_thres: 0.8
+    conf_thres: 0.0
+    iou_thres: 0.5
+    dup_iou_thres: 0.2
+    confirm_iou_thres: 0.9
+    img_size: [1920, 1080]
+    prop_flag: False
+    use_kalman: True 
+    asso_with_motion: True 
+    appearance_lambda: 0.6
+    motion_gated: False
+    area_gated: False
+    area_diff_threshold: 0.3
+    assign_thres: 0.2
+    category_gated: False
+    calculate_metrics: True
+    reactivate_on_edge: True
+    eval_only: False
+    eval_prod: False
+    center_percent: 1.
+    feature_on_frame: False
+    distance_name: 'euclidean'

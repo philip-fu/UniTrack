@@ -6,12 +6,13 @@ import shutil
 
 # Modify here
 AP_ROOT = 'C:/Users/Philip Fu/datasets/ap'
-SEQ_ROOT = osp.join(AP_ROOT, 'images/train')
+SEQ_ROOT = osp.join(AP_ROOT, 'images/train_temp')
+SEQ = [] #['201907251018_darshan_lane48', '201907251032_darshan_lane48', '201907251047_darshan_lane47', '201907251053_darshan_lane47', '201907251056_darshan_lane47', '201907251100_darshan_lane47', '201907251103_darshan_lane47', '201907251115_darshan_lane46', '201907251118_darshan_lane46', '201907251121_darshan_lane46']
 
 def main(ap_root=AP_ROOT, seq_root=SEQ_ROOT):
     label_root = osp.join(ap_root, 'obs', 'det', 'train')
     os.makedirs(label_root, exist_ok=True)
-    seqs = [s for s in os.listdir(seq_root)]
+    seqs = [s for s in os.listdir(seq_root)] if len(SEQ) == 0 else SEQ
 
     tid_curr = 0
     tid_last = -1
@@ -39,8 +40,8 @@ def main(ap_root=AP_ROOT, seq_root=SEQ_ROOT):
             x += w / 2
             y += h / 2
             label_fpath = osp.join(seq_label_root, '{:06d}.txt'.format(fid))
-            label_str = '{:.6f} {:.6f} {:.6f} {:.6f} 1.0\n'.format(
-                x / seq_width, y / seq_height, w / seq_width, h / seq_height)
+            label_str = '{:.6f} {:.6f} {:.6f} {:.6f} {:.6f}\n'.format(
+                x / seq_width, y / seq_height, w / seq_width, h / seq_height, mark)
             with open(label_fpath, 'a') as f:
                 f.write(label_str)
 

@@ -9,6 +9,8 @@ import torch
 import torchvision
 import numpy as np
 
+from shapely.geometry import box as shapely_box
+from shapely.ops import unary_union
 
 def xyxy2xywh(x):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
@@ -65,6 +67,20 @@ def tlwh_to_tlbr(tlwh):
     ret[2:] += ret[:2]
     return ret
 
+def center_crop(coords, center_percent=0.85):
+    c = coords.clone()
+    
+    crop_width = (coords[:, 2] - coords[:, 0]) * np.sqrt(center_percent)
+    crop_height = (coords[:, 3] - coords[:, 1]) * np.sqrt(center_percent)
+    mid_x, mid_y = ((coords[:, 0] + coords[:, 2])/2).int(), ((coords[:, 1] + coords[:, 3])/2).int()
+    cw2, ch2 = (crop_width/2).int(), (crop_height/2).int() 
+    
+    c[:, 0] = mid_x - cw2
+    c[:, 2] = mid_x + cw2
+    c[:, 1] = mid_y - ch2
+    c[:, 3] = mid_y + ch2
+    
+    return c
 
 def scale_box(scale, coords):
     c = coords.clone()
@@ -179,3 +195,20 @@ def skltn2box(skltn):
     if ymin == ymax:
         ymax += 10
     return np.array([xmin, ymin, xmax, ymax])
+
+
+def is_box_inside(query_box, gallery_boxes, thres=0.9):
+    """if the query_box is covered by gallery_boxes
+    """
+
+    gallery_polys = unary_union([shapely_box(gb[0], gb[1], gb[2], gb[3]) for gb in gallery_boxes])
+    query_poly = shapely_box(query_box[0], query_box[1], query_box[2], query_box[3])
+
+    num = query_poly.difference(gallery_polys).area
+    denom = query_poly.area
+
+    if (1 - num/denom) > thres:
+        return True
+    else:
+        return False
+

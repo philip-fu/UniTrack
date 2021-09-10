@@ -39,9 +39,17 @@ class AssociationTracker(object):
 
         self.app_model = AppearanceModel(opt).to(opt.device)
         self.app_model.eval()
+
+        self.distance_dict = {
+            'rsm': matching.reconsdot_distance,
+            'cosine': matching.center_emb_distance,
+            'euclidean': matching.emb_euclidean_distance
+        }
+
+        self.distance = self.distance_dict[self.opt.distance_name]
         
         if not self.opt.asso_with_motion:
-            self.opt.motion_lambda = 1
+            self.opt.appearance_lambda = 1
             self.opt.motion_gated = False
         
     def extract_emb(self, img, obs):
@@ -73,17 +81,12 @@ class AssociationTracker(object):
         ''' Step 2: First association, with embedding'''
         tracks = joint_stracks(tracked_stracks, self.lost_stracks)
 
-        #for trk in tracks:
-        #    if trk.track_id in (11, 14):
-        #        print("track id {}, state: {}, activated: {}. Frame id {}, end frame {}".format(trk.track_id, trk.state, trk.is_activated, trk.frame_id, trk.end_frame))
-
-
-        dists, recons_ftrk = matching.reconsdot_distance(tracks, detections)
+        dists = self.distance(tracks, detections)
         if self.opt.use_kalman: 
             # Predict the current location with KF
             STrack.multi_predict(tracks)
             dists = matching.fuse_motion(self.kalman_filter, dists, tracks, detections, 
-                    lambda_=self.opt.motion_lambda, gate=self.opt.motion_gated)
+                    lambda_=self.opt.appearance_lambda, gate=self.opt.motion_gated, img_size=self.opt.img_size)
         if len(obs) > 0 and self.opt.category_gated and obs.shape[1] == 6:
             dists = matching.category_gate(dists, tracks, detections)
         if len(obs) > 0 and self.opt.area_gated:
@@ -111,10 +114,10 @@ class AssociationTracker(object):
                 activated_stracks.append(track)
             else:
                 reactivate = True
-                if self.opt.reactivate_on_edge:
-                    if is_box_on_edge(track.tlbr, self.opt.img_size[::-1]):
-                        if not is_box_on_edge(det.tlbr, self.opt.img_size[::-1]):
-                            reactivate = False
+                #if self.opt.reactivate_on_edge:
+                #    if is_box_on_edge(track.tlbr, self.opt.img_size[::-1]):
+                #        if not is_box_on_edge(det.tlbr, self.opt.img_size[::-1]):
+                #            reactivate = False
                 if reactivate:
                     track.re_activate(det, self.frame_id, new_id=False)
                     refind_stracks.append(track)
@@ -124,7 +127,15 @@ class AssociationTracker(object):
             tracks = [tracks[i] for i in u_track if tracks[i].state==TrackState.Tracked]
             detections = [detections[i] for i in u_detection]
             dists = matching.iou_distance(tracks, detections)
-            matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.7) # was 0.5
+            dists = matching.fuse_motion(self.kalman_filter, dists, tracks, detections, 
+                    lambda_=1., gate=self.opt.motion_gated, img_size=self.opt.img_size)
+            if len(detections) > 0 and self.opt.category_gated and obs.shape[1] == 6:
+                dists = matching.category_gate(dists, tracks, detections)
+            if len(detections) > 0 and self.opt.area_gated:
+                dists = matching.area_gate(dists, tracks, detections, self.opt.area_diff_threshold)
+            if len(detections) > 0 and self.opt.reactivate_on_edge:
+                dists = matching.edge_gate(dists, tracks, detections, im_shape=self.opt.img_size[::-1])
+            matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.5) # was 0.5
             
             for itracked, idet in matches:
                 track = tracks[itracked]
@@ -139,6 +150,12 @@ class AssociationTracker(object):
             '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
             detections = [detections[i] for i in u_detection]
             dists = matching.iou_distance(unconfirmed, detections)
+            if len(detections) > 0 and self.opt.category_gated and obs.shape[1] == 6:
+                dists = matching.category_gate(dists, unconfirmed, detections)
+            if len(detections) > 0 and self.opt.area_gated:
+                dists = matching.area_gate(dists, unconfirmed, detections, self.opt.area_diff_threshold)
+            if len(detections) > 0 and self.opt.reactivate_on_edge:
+                dists = matching.edge_gate(dists, unconfirmed, detections, im_shape=self.opt.img_size[::-1])
             matches, u_unconfirmed, u_detection = matching.linear_assignment(
                     dists, thresh=self.opt.confirm_iou_thres)
             for itracked, idet in matches:
@@ -161,8 +178,18 @@ class AssociationTracker(object):
             track = detections[inew]
             if track.score < self.det_thresh:
                 continue
-            #track.activate(self.kalman_filter, self.frame_id)
-            track.activate(KalmanFilter(), self.frame_id)
+
+            # do not init if overlap too much with existing track
+            #pdist = matching.iou_distance([track], [t for t in self.tracked_stracks if t.state == TrackState.Tracked])
+            #if np.any(pdist < self.opt.dup_iou_thres):
+            #    continue
+            
+            #if is_box_inside(track.tlbr, [t.tlbr for t in self.tracked_stracks if t.state == TrackState.Tracked]):
+            #    print("New detected box is covered by other tracks already. Skipping..")
+            #    continue
+
+            track.activate(self.kalman_filter, self.frame_id)
+            #track.activate(KalmanFilter(), self.frame_id)
             activated_stracks.append(track)
 
         """ Step 5: Update state"""

@@ -7,11 +7,33 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 import numpy as np
+import torchvision.models as models
+
 
 import utils
 import model.resnet as resnet
 import model.hrnet as hrnet
 import model.random_feat_generator as random_feat_generator
+
+# add reid model
+import torchreid
+from torchreid.utils import (
+    load_pretrained_weights
+)
+
+# add fast reid
+from fastreid.config import get_cfg
+from fastreid.modeling.meta_arch import build_model
+from fastreid.utils.checkpoint import Checkpointer
+
+def setup_cfg(args):
+    """For fast reid repo configs
+    """
+    cfg = get_cfg()
+    cfg.merge_from_file(args.config_file)
+    cfg.merge_from_list(args.opts)
+    cfg.freeze()
+    return cfg
 
 class AppearanceModel(nn.Module):
     def __init__(self, args):
@@ -76,6 +98,35 @@ def load_tc_model(ckpt_path):
 
     return net
 
+def load_bd_model(args):
+    model = torchreid.models.build_model(
+        name=args.model_type,
+        num_classes=args.num_train_pids
+    )
+
+    load_pretrained_weights(model, args.resume)
+
+    return model
+
+
+
+def load_fast_reid_model(args):
+    cfg = setup_cfg(args)
+    cfg.defrost()
+    cfg.MODEL.BACKBONE.PRETRAIN = False
+    if cfg.MODEL.HEADS.POOL_LAYER == 'FastGlobalAvgPool':
+        cfg.MODEL.HEADS.POOL_LAYER = 'GlobalAvgPool'
+    
+    model = build_model(cfg)
+    Checkpointer(model).load(cfg.MODEL.WEIGHTS)
+    if hasattr(model.backbone, 'deploy'):
+        model.backbone.deploy(True)
+    model.eval()
+    
+    return model
+
+
+
 class From3D(nn.Module):
     ''' Use a 2D convnet as a 3D convnet '''
     def __init__(self, resnet):
@@ -94,6 +145,7 @@ def make_encoder(args):
     SSL_MODELS = ['byol', 'deepcluster-v2', 'infomin', 'insdis', 'moco-v1', 'moco-v2',
             'pcl-v1', 'pcl-v2','pirl', 'sela-v2', 'swav', 'simclr-v1', 'simclr-v2',
             'pixpro', 'detco', 'barlowtwins']
+    BD_MODELS = ['bdnet']
     model_type = args.model_type
     if model_type == 'crw':
         net = resnet.resnet18()
@@ -135,12 +187,20 @@ def make_encoder(args):
         net = load_tc_model(args.resume)
     elif model_type in SSL_MODELS:
         net = resnet.resnet50(pretrained=False)
-        net_ckpt = torch.load(args.resume)
+        net_ckpt = torch.load(args.resume, map_location='cuda:0')
         partial_load(net_ckpt, net)
     elif 'hrnet' in model_type:
         net = hrnet.get_cls_net(model_type, return_stage=args.return_stage, pretrained=args.resume)
     elif model_type == 'random':
         net = random_feat_generator.RandomFeatGenerator(args)
+    elif model_type in BD_MODELS:
+        net = load_bd_model(args)
+    elif model_type == 'custom':
+        net = models.resnet50()
+        net_ckpt = torch.load(args.resume, map_location='cuda:0')
+        partial_load(net_ckpt, net, log=True)
+    elif model_type == 'fast-reid':
+        net = load_fast_reid_model(args)
     else:
         raise ValueError('Invalid model_type.')
     if hasattr(net, 'modify'):
